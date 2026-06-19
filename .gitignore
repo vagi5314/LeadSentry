@@ -1,0 +1,80 @@
+# ── Secrets & local config ──────────────────────────────────────────────
+_api_key.txt
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+n8n-config.json
+# Claude Code local settings + session memory (machine/personal)
+.claude/
+.remember/
+
+# ── Scratch / debug / one-off scripts ───────────────────────────────────
+analyze*.py
+analyze_graph.py
+check_*.py
+compare_*.py
+list_*.py
+dump_*.py
+debug_*.py
+fix_*.py
+fix_*.ps1
+deploy_*.py
+deploy_fix_v4.py
+remove_orphans.py
+activate_wf.py
+get_validate_code.py
+senior_review.py
+v3_if_check.py
+v4_if_check.py
+export_deployed.py
+# superseded builder / e2e versions (v4 is current)
+build_v3.py
+e2e_test.py
+e2e_test_v2.py
+test_v4_spam.py
+test_long_desc.py
+test_single.py
+test_after_fix.py
+test_legit_2217.py
+test_v2217.py
+test_v3_path.py
+
+# ── CDP / browser screenshot helpers ────────────────────────────────────
+cdp_*.py
+
+# ── Old workflow snapshots & execution dumps (not the current build) ────
+leadsentry.json
+leadsentry_ascii.json
+leadsentry_current.json
+leadsentry_fixed.json
+leadsentry_formatted.json
+leadsentry_full.json
+leadsentry_pretty.json
+leadsentry_v2.json
+leadsentry_v3.json
+workflow_deployed.json
+exec365.json
+execution_*.json
+_tmp.json
+test_put.json
+test_put_resp.json
+nodes.txt
+
+# ── Screenshots ─────────────────────────────────────────────────────────
+*.png
+
+# ── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ── OS ──────────────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+desktop.ini

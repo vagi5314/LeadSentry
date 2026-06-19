@@ -1,0 +1,837 @@
+{
+  "name": "LeadSentry Pro v4 \u2014 Enterprise Lead Qualifier",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leadsentry-v4",
+        "responseMode": "responseNode",
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      },
+      "id": "n1",
+      "name": "Receive Lead",
+      "position": [
+        200,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "ls-prod-v4"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// PASS-PUT: No webhook secret configured yet\n// In production, add HMAC-SHA256 verification using n8n credentials\ntry {\n  return $input.all().map(item => ({ json: { ...item.json } }));\n} catch(e) {\n  return [{ json: { _error: e.message } }];\n}\n"
+      },
+      "id": "hmac_verify",
+      "name": "HMAC Verify",
+      "position": [
+        400,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  return $input.all().map(item => ({ json: { ...item.json } }));\n} catch(e) {\n  return [{ json: { _error: e.message } }];\n}\n"
+      },
+      "id": "rate_limit_check",
+      "name": "Rate Limit Check",
+      "position": [
+        600,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  return $input.all().map(item => ({ json: { ...item.json } }));\n} catch(e) {\n  return [{ json: { _error: e.message } }];\n}\n"
+      },
+      "id": "idempotency_gate",
+      "name": "Idempotency Gate",
+      "position": [
+        800,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "respond_spam_400",
+      "name": "Respond Spam 400",
+      "position": [
+        2200,
+        150
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const RAW = $input.first().json;\n  const input = (RAW && typeof RAW === 'object' && !Array.isArray(RAW)) ? (RAW.body || RAW) : null;\n  const ts = new Date().toISOString();\n  const leadId = 'ls_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);\n  const errors = [];\n  const warnings = [];\n\n  if (!input || typeof input !== 'object' || Array.isArray(input)) {\n    errors.push('Request body must be a JSON object');\n    const result = { valid: false, errors, warnings, leadId, receivedAt: ts, sanitized: null, isSpam: true };\n    return [{ json: { _action: 'reject_spam', ...result } }];\n  }\n\n  // Payload size\n  if (JSON.stringify(RAW).length > 32768) { errors.push('Payload too large (max 32KB)'); }\n\n  // Timestamp age\n  if (input.submittedAt) {\n    const age = Date.now() - new Date(input.submittedAt).getTime();\n    if (age > 86400000) errors.push('Submission timestamp is older than 24 hours');\n    if (age < 0) warnings.push('Submission timestamp is in the future');\n  }\n\n  // Timing analysis\n  if (input.pageLoadTime) {\n    const loadTs = new Date(input.pageLoadTime).getTime();\n    const submitTs = input.submittedAt ? new Date(input.submittedAt).getTime() : Date.now();\n    if (submitTs - loadTs < 3000) warnings.push('Submission under 3 seconds \u2014 possible bot');\n  }\n\n  // Disposable email domains\n  const disposable = new Set(['tempmail.com','throwaway.email','guerrillamail.com','temp-mail.org',\n    'fakeinbox.com','sharklasers.com','dispostable.com','mailinator.com','yopmail.com','yopmail.fr',\n    'trashmail.com','trashmail.net','maildrop.cc','mailsac.com','10minutemail.com','guerrillamailblock.com',\n    'grr.la','spam4.me','bccto.me','chacuo.net','020.co.uk','mintemail.com','meltmail.com',\n    'discard.email','discardmail.com','mailexpire.com','deadaddress.com','mailforspam.com',\n    'spamfree24.org','spamhole.com','spamify.com','spaminator.de','spaml.com','spaml.de',\n    'spamoff.de','tempemail.net','tempinbox.com','tempomail.fr','temporaryemail.net',\n    'temporaryforwarding.com','thankyou2010.com','thisisnotmyrealemail.com','throwam.com',\n    'tmail.ws','tmailinator.com','tradermail.info','trbvm.com','trbvn.com',\n    'turual.com','twinmail.de','tyldd.com','uggsrock.com','umail.net',\n    'upliftnet.com','venompen.com','veryrealliemail.com','viditag.com',\n    'viewcastmedia.com','viewcastmedia.net','viewcastmedia.org','weg-werf-email.de',\n    'wetrainbayarea.com','wetrainbayarea.org','wh4f.org','whatiaas.com',\n    'whatpaas.com','whyspam.me','wikidocuslice.com','willhackforfood.biz',\n    'willselfdestruct.com','winemaven.info','wronghead.com','wuzup.net',\n    'wuzupmail.net','wwwnew.eu','xagloo.com','xemaps.com','xents.com',\n    'xjoi.com','xmaily.com','xoxy.net','yapped.net','yeah.net',\n    'yep.it','yogamaven.com','yomail.info','yordan.co.uk','you-spam.com',\n    'ypmail.webarnak.fr','yuurok.com','zehnminutenmail.de','1chuan.com',\n    '1pad.de','20minutemail.com','2prong.com','33mail.com','3d-painting.com',\n    '4warding.com','4warding.net','4warding.org','5ghgfhfghfgh.tk','60minutemail.com',\n    '675hosting.com','675hosting.net','675hosting.org','6url.com','75hosting.com',\n    '7tags.com','9ox.net','a-bc.net','afrobacon.com','agedmail.com',\n    'ajaxapp.net','alivance.com','amilegit.com','amiri.net','anappthat.com',\n    'antichef.com','antichef.net','antireg.ru','antispam.de','antispammail.de',\n    'armyspy.com','artman-conception.com','azmeil.tk']);\n\n  // Spam patterns\n  const spamPatterns = [\n    /test@test\\.com/i, /asdf@asdf\\.com/i, /xxx@xxx\\.com/i,\n    /spam@/i, /fuck@/i, /shit@/i, /admin@localhost/i,\n    /hello@world\\.com/i, /foo@bar\\.com/i, /a@b\\.com/i,\n    /no-reply@/i, /noreply@/i, /donotreply@/i,\n    /\\.ru$/i, /\\.cn$/i, /\\.tk$/i, /\\.ml$/i, /\\.ga$/i, /\\.cf$/i\n  ];\n\n  // Competitor domains\n  const competitors = new Set([\n    'competitor1.com','competitor2.com','competitor3.com',\n    'rivalco.com','fakecompany.com'\n  ]);\n\n  const email = (input.email || '').toLowerCase().trim();\n  const domain = email.split('@')[1] || '';\n  const name = (input.name || '').trim();\n  const description = (input.description || '').trim();\n  const websiteUrl = (input.website_url || '').trim();\n  const linkedinUrl = (input.linkedin_url || '').trim();\n  const company = (input.company || '').trim();\n\n  // Honeypot check (field should be empty)\n  let isSpam = false;\n  let spamReasons = [];\n\n  if (websiteUrl && websiteUrl.length > 0) {\n    isSpam = true;\n    spamReasons.push('Honeypot field filled');\n  }\n\n  // Disposable email\n  if (disposable.has(domain)) {\n    isSpam = true;\n    spamReasons.push('Disposable email domain: ' + domain);\n  }\n\n  // Competitor detection\n  let isCompetitor = false;\n  if (competitors.has(domain)) {\n    isCompetitor = true;\n    spamReasons.push('Competitor domain detected: ' + domain);\n  }\n\n  // Spam patterns\n  for (const p of spamPatterns) {\n    if (p.test(email)) { isSpam = true; spamReasons.push('Spam email pattern'); break; }\n  }\n\n  // Bot user agent\n  const ua = (input.user_agent || input.userAgent || '').toLowerCase();\n  const bots = ['bot','crawler','spider','scraper','curl','wget','python-requests','headless','phantom','selenium'];\n  for (const b of bots) {\n    if (ua.includes(b)) { isSpam = true; spamReasons.push('Bot user agent'); break; }\n  }\n\n  // All-caps name\n  if (name && name === name.toUpperCase() && name.length > 3) warnings.push('All-caps name');\n\n  // Multiple URLs in description\n  const urlCount = (description.match(/https?:\\/\\//g) || []).length;\n  if (urlCount > 2) { isSpam = true; spamReasons.push('Multiple URLs in description (' + urlCount + ')'); }\n\n  // Garbage description (repeated chars)\n  if (description.length > 10) {\n    const uniqueChars = new Set(description.split('')).size;\n    if (uniqueChars < 5) { isSpam = true; spamReasons.push('Low entropy description'); }\n  }\n\n  // Minimum viable data\n  if (!input.name && !input.email) {\n    isSpam = true;\n    spamReasons.push('No name or email provided');\n  }\n\n  const sanitized = {\n    name: name.replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/g, '').substring(0, 100),\n    email: email,\n    phone: ((p)=>{const c=(p||'').replace(/[^0-9+\\-() ]/g,'').substring(0,20);return c.length>=7?c:null;})(input.phone),\n    company: company.replace(/[\\x00-\\x1F\\x7F]/g, '').substring(0, 100),\n    role: (input.role || '').replace(/[\\x00-\\x1F\\x7F]/g, '').substring(0, 50),\n    companySize: (input.company_size || input.companySize || '').toString().substring(0, 20),\n    budget: input.budget,\n    urgency: (input.urgency || '').toLowerCase().substring(0, 20),\n    source: (input.source || 'website').toLowerCase().substring(0, 30),\n    description: description.replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/g, '').substring(0, 2000),\n    linkedin_url: linkedinUrl.substring(0, 200),\n    website_url: websiteUrl.substring(0, 200),\n    landing_page: (input.landing_page || '').substring(0, 200),\n    utm_source: (input.utm_source || '').substring(0, 50),\n    utm_medium: (input.utm_medium || '').substring(0, 50),\n    utm_campaign: (input.utm_campaign || '').substring(0, 50),\n    submittedAt: input.submittedAt || ts,\n    pageLoadTime: input.pageLoadTime || null,\n    user_agent: ua.substring(0, 200),\n  };\n\n  if (errors.length > 0) isSpam = true;\n\n  return [{ json: {\n    valid: errors.length === 0,\n    isSpam,\n    isCompetitor,\n    spamReasons,\n    errors,\n    warnings,\n    leadId,\n    receivedAt: ts,\n    sanitized\n  }}];\n} catch(e) {\n  return [{ json: { valid: false, isSpam: true, errors: ['Filter crash: ' + e.message], warnings: [], leadId: 'err_' + Date.now().toString(36), receivedAt: new Date().toISOString(), sanitized: null } }];\n}\n"
+      },
+      "id": "bot_spam_filter",
+      "name": "Bot & Spam Filter",
+      "position": [
+        1600,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isSpam }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "id": "is_spam",
+      "name": "Is Spam?",
+      "position": [
+        1800,
+        300
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  return [{ json: { ...d, response: { status: 'rejected', reason: 'spam_or_bot', details: d.spamReasons || [], leadId: d.leadId } } }];\n} catch(e) {\n  return [{ json: { response: { status: 'rejected', reason: 'spam_filter_error' } } }];\n}\n"
+      },
+      "id": "reject_spam",
+      "name": "Reject Spam",
+      "position": [
+        2000,
+        150
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const allInputs = $input.all();\n  const firstItem = allInputs[0];\n  const d = firstItem ? firstItem.json : {};\n  const raw = d.sanitized || {};\n  // Create mutable copy (n8n freezes input objects)\n  const s = {};\n  for (const [k, v] of Object.entries(raw)) {\n    s[k] = (typeof v === 'object' && v !== null) ? JSON.parse(JSON.stringify(v)) : v;\n  }\n  const errors = [];\n  const warnings = [...(d.warnings || [])];\n\n  // Required: name\n  if (!s.name || s.name.trim().length < 2) errors.push('Name is required (min 2 chars)');\n\n  // Required: email\n  if (!s.email) {\n    errors.push('Email is required');\n  } else {\n    const emailParts = s.email.split('@');\n    if (emailParts.length !== 2) errors.push('Invalid email format');\n    else {\n      const domain = emailParts[1];\n      if (!domain || !domain.includes('.')) errors.push('Email missing valid domain');\n      else if (domain.split('.').pop().length < 2) errors.push('Email TLD too short');\n      else if (emailParts[0].length === 0) errors.push('Email missing local part');\n      // Free email warning\n      const freeEmails = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com','mail.com','protonmail.com','zoho.com','yandex.com'];\n      if (freeEmails.includes(domain)) warnings.push('Free email provider \u2014 may not be business contact');\n    }\n  }\n\n  // Optional: phone normalization\n  if (s.phone && s.phone.length < 6) warnings.push('Phone number suspiciously short');\n\n  // Budget normalization\n  let budget = 0;\n  if (s.budget !== undefined && s.budget !== null && s.budget !== '') {\n    let budgetStr = s.budget.toString().toLowerCase().replace(/[$,\u20ac\u00a3\u00a5\\s]/g, '');\n    const multiplier = budgetStr.includes('m') ? 1000000 : budgetStr.includes('k') ? 1000 : 1;\n    budgetStr = budgetStr.replace(/[mk]/g, '');\n    if (/^0x[0-9a-f]+$/i.test(budgetStr)) budget = parseInt(budgetStr, 16) * multiplier;\n    else if (/^-?\\d+(\\.\\d+)?$/.test(budgetStr)) budget = parseFloat(budgetStr) * multiplier;\n    else budget = 0;\n    if (budget < 0) { budget = 0; warnings.push('Negative budget normalized to 0'); }\n    if (budget > 100000000) warnings.push('Budget unusually high \u2014 verify');\n  }\n  s.budget = budget;\n\n  // Source normalization\n  const validSources = ['website','organic','paid','referral','social','event','partner','cold-outreach','\u5e7f\u544a','\u5176\u4ed6'];\n  if (s.source && !validSources.includes(s.source)) {\n    warnings.push('Unknown source \"' + s.source + '\" \u2014 mapped to \"other\"');\n    s.source = 'other';\n  }\n  if (!s.source) s.source = 'other';\n\n  // Urgency normalization\n  const urgencyMap = { 'high': 'high', 'urgent': 'high', 'critical': 'high', 'asap': 'high',\n    'medium': 'medium', 'normal': 'medium', 'moderate': 'medium',\n    'low': 'low', 'flexible': 'low', 'exploring': 'low', 'researching': 'low', 'browsing': 'low' };\n  s.urgency = urgencyMap[(s.urgency || '').toLowerCase()] || 'medium';\n\n  // Description length\n  if (s.description && s.description.length < 10) warnings.push('Description very short \u2014 scoring may be limited');\n\n  // Role normalization\n  const roleLower = (s.role || '').toLowerCase();\n  const seniorPatterns = ['ceo','cto','cfo','coo','cmo','vp','vice president','director','head','chief','founder','co-founder','owner','partner','president','general manager','managing director'];\n  const midPatterns = ['manager','lead','senior','principal','staff','sr.','jr.'];\n  const isSeniorRole = seniorPatterns.some(p => roleLower.includes(p));\n  const isMidRole = midPatterns.some(p => roleLower.includes(p)) && !isSeniorRole;\n\n  // Company size parsing\n  let companySizeNum = 0;\n  let companySizeLabel = 'unknown';\n  if (s.companySize) {\n    const sizeStr = s.companySize.toLowerCase().replace(/[^0-9k+m+-]/g, '');\n    const hasK = sizeStr.includes('k');\n    const hasM = sizeStr.includes('m');\n    const rangeMatch = sizeStr.match(/(\\d+)-(\\d+)/);\n    if (rangeMatch) {\n      const avg = (parseInt(rangeMatch[1]) + parseInt(rangeMatch[2])) / 2;\n      companySizeNum = hasK ? avg * 1000 : hasM ? avg * 1000000 : avg;\n    } else if (hasK) {\n      companySizeNum = (parseInt(sizeStr) || 1) * 1000;\n    } else if (hasM) {\n      companySizeNum = (parseInt(sizeStr) || 1) * 1000000;\n    } else {\n      companySizeNum = parseInt(sizeStr) || 0;\n    }\n    if (companySizeNum >= 1000) companySizeLabel = 'enterprise';\n    else if (companySizeNum >= 200) companySizeLabel = 'mid-market';\n    else if (companySizeNum >= 50) companySizeLabel = 'small-business';\n    else if (companySizeNum > 0) companySizeLabel = 'startup';\n  }\n\n  // Email type detection\n  const domain = s.email ? s.email.split('@')[1] : '';\n  const freeEmails = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com','mail.com','protonmail.com'];\n  const emailType = freeEmails.includes(domain) ? 'personal' : 'business';\n\n  return [{ json: {\n    ...d,\n    sanitized: s,\n    valid: errors.length === 0,\n    errors,\n    warnings,\n    enrichment: {\n      emailType,\n      isSeniorRole,\n      isMidRole,\n      companySizeNum,\n      companySizeLabel,\n      domain\n    }\n  }}];\n} catch(e) {\n  return [{ json: { ...($input.first().json || {}), valid: false, errors: ['Validation crash: ' + e.message], warnings: [] } }];\n}\n"
+      },
+      "id": "validate_sanitize",
+      "name": "Validate & Sanitize",
+      "position": [
+        1800,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "id": "is_valid",
+      "name": "Is Valid?",
+      "position": [
+        2000,
+        300
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  return [{ json: {\n    status: 'error',\n    code: 400,\n    message: 'Validation failed',\n    errors: d.errors || [],\n    warnings: d.warnings || [],\n    leadId: d.leadId\n  }}];\n} catch(e) {\n  return [{ json: { status: 'error', code: 400, message: 'Validation error formatting failed' } }];\n}\n"
+      },
+      "id": "format_validation_error",
+      "name": "Format Validation Error",
+      "position": [
+        2200,
+        250
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "respond_400",
+      "name": "Respond 400",
+      "position": [
+        2400,
+        250
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  const s = d.sanitized || {};\n  const e = d.enrichment || {};\n  const warnings = [...(d.warnings || [])];\n\n  // Description quality analysis\n  const desc = (s.description || '').toLowerCase();\n  let descriptionQuality = 'none';\n  let painSignals = [];\n  let decisionSignals = [];\n  let timelineSignals = [];\n\n  if (desc.length > 200) descriptionQuality = 'excellent';\n  else if (desc.length > 100) descriptionQuality = 'good';\n  else if (desc.length > 30) descriptionQuality = 'fair';\n  else if (desc.length > 0) descriptionQuality = 'poor';\n\n  // Pain signals\n  const painKeywords = ['problem','issue','struggling','challenge','pain','frustrat','difficult','broken',' failing','slow','expensive','wast','lost revenue','churn','complaint'];\n  for (const kw of painKeywords) { if (desc.includes(kw)) painSignals.push(kw); }\n\n  // Decision signals\n  const decisionKeywords = ['decided','choosing','comparing','evaluating','looking for','need a solution','ready to','want to switch','implementing','selecting','shortlist','rfp','rfi'];\n  for (const kw of decisionKeywords) { if (desc.includes(kw)) decisionSignals.push(kw); }\n\n  // Timeline signals\n  const timelineKeywords = ['asap','immediately','urgent','this month','this quarter','next month','by end of','deadline','before','starting now','need this week'];\n  for (const kw of timelineKeywords) { if (desc.includes(kw)) timelineSignals.push(kw); }\n\n  // Budget from description\n  const budgetMatch = desc.match(/\\$[\\d,]+(?:k|m)?|\\d+(?:k|m)\\s*(?:budget|dollars|usd)/i);\n  if (budgetMatch && !s.budget) {\n    warnings.push('Budget extracted from description');\n  }\n\n  // Intent signals from UTM/source\n  const highIntentSources = ['demo','trial','pricing','contact','quote','partner','referral'];\n  const isHighIntentSource = highIntentSources.some(s => (d.sanitized?.source || '').includes(s));\n  const isHighIntentLanding = (s.landing_page || '').toLowerCase().includes('pricing') || (s.landing_page || '').toLowerCase().includes('demo');\n\n  return [{ json: {\n    ...d,\n    warnings,\n    enrichment: {\n      ...e,\n      descriptionQuality,\n      painSignals,\n      decisionSignals,\n      timelineSignals,\n      painCount: painSignals.length,\n      decisionCount: decisionSignals.length,\n      timelineCount: timelineSignals.length,\n      isHighIntentSource,\n      isHighIntentLanding,\n      hasBudget: s.budget > 0,\n      hasRole: !!s.role,\n      hasCompany: !!s.company,\n      hasPhone: !!(s.phone && s.phone.length > 5),\n      hasLinkedIn: !!(s.linkedin_url && s.linkedin_url.length > 10),\n      dataCompleteness: [s.name, s.email, s.phone, s.company, s.role, s.description].filter(Boolean).length\n    }\n  }}];\n} catch(e) {\n  return [{ json: { ...($input.first().json || {}), enrichment: { error: e.message, descriptionQuality: 'unknown', painCount: 0, decisionCount: 0, timelineCount: 0, dataCompleteness: 0 } } }];\n}\n"
+      },
+      "id": "enrich_lead",
+      "name": "Enrich Lead",
+      "position": [
+        2200,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  const s = d.sanitized || {};\n  const e = d.enrichment || {};\n\n  // \u2500\u2500 FIT SCORE (0-100) \u2500\u2500\n  let fitScore = 0;\n\n  // Email type (15 pts)\n  if (e.emailType === 'business') fitScore += 15;\n  else if (e.emailType === 'personal') fitScore += 3;\n\n  // Role seniority (25 pts)\n  if (e.isSeniorRole) fitScore += 25;\n  else if (e.isMidRole) fitScore += 15;\n  else if (s.role) fitScore += 5;\n\n  // Company size (20 pts)\n  if (e.companySizeLabel === 'enterprise') fitScore += 20;\n  else if (e.companySizeLabel === 'mid-market') fitScore += 15;\n  else if (e.companySizeLabel === 'small-business') fitScore += 10;\n  else if (e.companySizeLabel === 'startup') fitScore += 8;\n\n  // Phone provided (10 pts)\n  if (e.hasPhone) fitScore += 10;\n\n  // LinkedIn provided (10 pts)\n  if (e.hasLinkedIn) fitScore += 10;\n\n  // Company provided (10 pts)\n  if (e.hasCompany) fitScore += 10;\n\n  // Description quality (10 pts)\n  if (e.descriptionQuality === 'excellent') fitScore += 10;\n  else if (e.descriptionQuality === 'good') fitScore += 7;\n  else if (e.descriptionQuality === 'fair') fitScore += 4;\n\n  fitScore = Math.min(100, fitScore);\n\n  // \u2500\u2500 INTENT SCORE (0-100) \u2500\u2500\n  let intentScore = 0;\n\n  // Urgency (25 pts)\n  const urgencyMap = { high: 25, medium: 12, low: 3 };\n  intentScore += urgencyMap[s.urgency] || 12;\n\n  // Budget (20 pts)\n  if (s.budget >= 100000) intentScore += 20;\n  else if (s.budget >= 50000) intentScore += 15;\n  else if (s.budget >= 10000) intentScore += 10;\n  else if (s.budget > 0) intentScore += 5;\n\n  // Pain signals (15 pts, max 15)\n  intentScore += Math.min(15, (e.painCount || 0) * 5);\n\n  // Decision signals (15 pts, max 15)\n  intentScore += Math.min(15, (e.decisionCount || 0) * 5);\n\n  // Timeline signals (10 pts, max 10)\n  intentScore += Math.min(10, (e.timelineCount || 0) * 5);\n\n  // High intent source (10 pts)\n  if (e.isHighIntentSource) intentScore += 10;\n  if (e.isHighIntentLanding) intentScore += 5;\n\n  // Data completeness bonus (5 pts)\n  if ((e.dataCompleteness || 0) >= 5) intentScore += 5;\n\n  intentScore = Math.min(100, intentScore);\n\n  // \u2500\u2500 BANT EXTRACTION \u2500\u2500\n  const bant = {\n    budget: { known: s.budget > 0, value: s.budget, score: s.budget >= 50000 ? 'strong' : s.budget > 0 ? 'moderate' : 'unknown' },\n    authority: { known: e.isSeniorRole || e.isMidRole, value: s.role || 'unknown', score: e.isSeniorRole ? 'decision-maker' : e.isMidRole ? 'influencer' : 'unknown' },\n    need: { known: (e.painCount || 0) > 0, value: (e.painSignals || []).join(', ') || 'not stated', score: (e.painCount || 0) >= 2 ? 'strong' : (e.painCount || 0) > 0 ? 'moderate' : 'unknown' },\n    timeline: { known: (e.timelineCount || 0) > 0, value: (e.timelineSignals || []).join(', ') || 'not stated', score: (e.timelineCount || 0) >= 2 ? 'immediate' : (e.timelineCount || 0) > 0 ? 'near-term' : 'unknown' }\n  };\n\n  // \u2500\u2500 CATEGORY \u2500\u2500\n  let category, emoji, priority, tier, nextAction, responseTime, assignTo, followUp;\n\n  if (fitScore >= 70 && intentScore >= 70) {\n    category = 'hot'; emoji = '\\u{1F525}'; priority = 1; tier = 'A';\n    nextAction = 'IMMEDIATE FOLLOW-UP'; responseTime = 'Within 5 minutes'; assignTo = 'Senior AE';\n    followUp = 'Call immediately + send personalized email with case study';\n  } else if (fitScore >= 70 && intentScore >= 60) {\n    category = 'hot'; emoji = '\\u{1F525}'; priority = 1; tier = 'A';\n    nextAction = 'FAST FOLLOW-UP'; responseTime = 'Within 15 minutes'; assignTo = 'Senior AE';\n    followUp = 'Call within 15 min + LinkedIn connect + send ROI calculator';\n  } else if (fitScore >= 70 && intentScore >= 30) {\n    category = 'warm'; emoji = '\\u{1F321}'; priority = 2; tier = 'B';\n    nextAction = 'QUALIFY & NURTURE'; responseTime = 'Within 1 hour'; assignTo = 'AE/SDR';\n    followUp = 'Discovery call + send relevant case studies';\n  } else if (fitScore >= 40 && intentScore >= 60) {\n    category = 'promising'; emoji = '\\u{1F33F}'; priority = 2; tier = 'B';\n    nextAction = 'SDR OUTREACH'; responseTime = 'Within 2 hours'; assignTo = 'SDR';\n    followUp = 'Personalized outreach + pain-point focused content';\n  } else if (fitScore >= 70) {\n    category = 'low_intent'; emoji = '\\u{1F50D}'; priority = 3; tier = 'C';\n    nextAction = 'RE-ENGAGE'; responseTime = 'Within 14 days'; assignTo = 'SDR';\n    followUp = 'Send relevant content + check timing';\n  } else if (fitScore >= 40 && intentScore >= 20) {\n    category = 'nurture'; emoji = '\\u{1F331}'; priority = 3; tier = 'C';\n    nextAction = 'ADD TO NURTURE'; responseTime = 'Within 7 days'; assignTo = 'Marketing';\n    followUp = 'Send case studies + ROI calculator';\n  } else {\n    category = 'cold'; emoji = '\\u{2744}'; priority = 4; tier = 'D';\n    nextAction = 'LOW PRIORITY'; responseTime = 'Within 30 days'; assignTo = 'Marketing';\n    followUp = 'Add to newsletter + monthly drip campaign';\n  }\n\n  // Risk factors\n  const riskFactors = [];\n  if (!s.company) riskFactors.push('No company name');\n  if (!s.role) riskFactors.push('No job role');\n  if (s.budget === 0) riskFactors.push('No budget specified');\n  if (e.emailType === 'personal') riskFactors.push('Personal email');\n  if ((e.painCount || 0) === 0) riskFactors.push('No pain signals');\n  if ((e.dataCompleteness || 0) < 3) riskFactors.push('Insufficient data');\n\n  return [{ json: {\n    ...d,\n    scoring: {\n      fitScore, intentScore, compositeScore: Math.round((fitScore + intentScore) / 2),\n      category, emoji, priority, tier, nextAction, responseTime, assignTo, followUp,\n      bant, riskFactors,\n      scoredAt: new Date().toISOString()\n    }\n  }}];\n} catch(e) {\n  return [{ json: { ...($input.first().json || {}), scoring: { fitScore: 0, intentScore: 0, compositeScore: 0, category: 'cold', emoji: '\\u{2744}', priority: 4, tier: 'D', nextAction: 'MANUAL REVIEW', responseTime: 'Within 24 hours', assignTo: 'Sales Manager', followUp: 'Manual review required', bant: {}, riskFactors: ['Scoring error'], error: e.message } } }];\n}\n"
+      },
+      "id": "score_lead",
+      "name": "Score Lead",
+      "position": [
+        2400,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  const s = d.sanitized || {};\n  const sc = d.scoring || {};\n  const email = (s.email || '').toLowerCase();\n  const domain = email.split('@')[1] || '';\n\n  // \u2500\u2500 TERRITORY \u2500\u2500\n  let territory = 'US';\n  const ukDomains = ['.co.uk','.org.uk','.me.uk','.net.uk','.police.uk'];\n  const euDomains = ['.de','.fr','.es','.it','.nl','.be','.at','.ch','.se','.no','.fi','.dk','.ie','.pt','.pl','.cz','.ro','.hu','.bg','.hr','.sk','.si','.lt','.lv','.ee','.lu','.mt','.cy'];\n  const apacDomains = ['.jp','.au','.nz','.in','.sg','.hk','.kr','.tw','.cn','.id','.ph','.my','.th','.vn'];\n  const latamDomains = ['.br','.mx','.ar','.cl','.co','.pe','.ve','.ec','.uy','.py','.bo','.cr','.pa'];\n\n  if (ukDomains.some(tld => domain.endsWith(tld))) territory = 'UK';\n  else if (euDomains.some(tld => domain.endsWith(tld))) territory = 'DACH';\n  else if (apacDomains.some(tld => domain.endsWith(tld))) territory = 'APAC';\n  else if (latamDomains.some(tld => domain.endsWith(tld))) territory = 'LATAM';\n\n  // \u2500\u2500 ROUTING RULES \u2500\u2500\n  const rules = {\n    hot: { sla: 300, channel: 'phone' },\n    warm: { sla: 3600, channel: 'email' },\n    promising: { sla: 7200, channel: 'email' },\n    low_intent: { sla: 1209600, channel: 'email' },\n    nurture: { sla: 604800, channel: 'marketing' },\n    cold: { sla: 2592000, channel: 'marketing' }\n  };\n\n  const category = sc.category || 'cold';\n  const rule = rules[category] || rules.cold;\n\n  // \u2500\u2500 CAPACITY CHECK \u2500\u2500\n  // Placeholder for real DB lookup \u2014 always false for now\n  const atCapacity = false;\n\n  // \u2500\u2500 AFTER-HOURS CHECK \u2500\u2500\n  const now = new Date();\n  const hour = now.getUTCHours();\n  const isAfterHours = hour < 8 || hour >= 18;\n  const dayOfWeek = now.getUTCDay();\n  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;\n\n  // \u2500\u2500 SLA CALCULATION \u2500\u2500\n  const receivedAt = d.receivedAt ? new Date(d.receivedAt).getTime() : Date.now();\n  let slaDeadline = new Date(receivedAt + rule.sla * 1000).toISOString();\n  let slaadjusted = false;\n\n  // After-hours adjustment: extend SLA to next business hour\n  if (isAfterHours && category !== 'hot') {\n    const nextMorning = new Date(now);\n    nextMorning.setUTCHours(8, 0, 0, 0);\n    if (nextMorning.getTime() <= now.getTime()) nextMorning.setUTCDate(nextMorning.getUTCDate() + 1);\n    if (isWeekend) {\n      while (nextMorning.getUTCDay() === 0 || nextMorning.getUTCDay() === 6) {\n        nextMorning.setUTCDate(nextMorning.getUTCDate() + 1);\n      }\n    }\n    slaDeadline = nextMorning.toISOString();\n    slaadjusted = true;\n  }\n\n  // \u2500\u2500 RECYCLING CHECK \u2500\u2500\n  // If lead was previously contacted, check cooldown\n  const staticData = $getWorkflowStaticData('node');\n  if (!staticData.leadHistory) staticData.leadHistory = {};\n  const leadKey = email;\n  const lastContact = staticData.leadHistory[leadKey];\n  const recyclingInterval = 90 * 24 * 60 * 60 * 1000; // 90 days\n  let isRecycled = false;\n  let recyclingAction = null;\n\n  if (lastContact) {\n    const timeSinceLastContact = Date.now() - lastContact;\n    if (timeSinceLastContact < recyclingInterval) {\n      isRecycled = true;\n      recyclingAction = 'Route to original owner';\n    } else {\n      recyclingAction = 'Re-qualify as new lead';\n    }\n  }\n  staticData.leadHistory[leadKey] = Date.now();\n\n  const routing = {\n    route: 'assigned',\n    assignTo: sc.assignTo || 'Sales Manager',\n    territory,\n    sla: rule.sla,\n    slaDeadline,\n    slaadjusted,\n    channel: rule.channel,\n    isAfterHours,\n    isWeekend,\n    isRecycled,\n    recyclingAction,\n    atCapacity,\n    receivedAt: new Date(receivedAt).toISOString()\n  };\n\n  return [{ json: { ...d, routing } }];\n} catch(e) {\n  return [{ json: { ...($input.first().json || {}), routing: { route: 'fallback', assignTo: 'Sales Manager', territory: 'US', sla: 86400, slaDeadline: null, channel: 'email', isAfterHours: false, isWeekend: false, isRecycled: false, atCapacity: false, receivedAt: new Date().toISOString(), error: e.message } } }];\n}\n"
+      },
+      "id": "route_lead",
+      "name": "Route Lead",
+      "position": [
+        2600,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  const s = d.sanitized || {};\n  const sc = d.scoring || {};\n  const rt = d.routing || {};\n  const e = d.enrichment || {};\n\n  // Opening angle based on BANT\n  let openingAngle = 'General inquiry';\n  if (sc.bant && sc.bant.need && sc.bant.need.known) {\n    openingAngle = 'Pain-focused: Address stated challenges with proven solution';\n  } else if (sc.bant && sc.bant.budget && sc.bant.budget.known) {\n    openingAngle = 'Value-focused: ROI-first conversation with budget context';\n  } else if (sc.bant && sc.bant.timeline && sc.bant.timeline.known) {\n    openingAngle = 'Urgency-focused: Timeline-driven solution delivery';\n  } else if (sc.riskFactors && sc.riskFactors.includes('No pain signals')) {\n    openingAngle = 'Discovery: Uncover pain before presenting solution';\n  }\n\n  // Action items\n  const actions = [];\n  if (sc.category === 'hot' || sc.category === 'warm') {\n    actions.push('Call within ' + (rt.sla < 3600 ? '15 minutes' : '1 hour'));\n    actions.push('Send personalized follow-up email');\n    if (e.hasLinkedIn) actions.push('LinkedIn connect request');\n  } else if (sc.category === 'promising') {\n    actions.push('SDR outreach within 2 hours');\n    actions.push('Send pain-point focused case study');\n  } else {\n    actions.push('Add to nurture sequence');\n    actions.push('Send relevant content');\n  }\n\n  // BANT summary\n  const bantSummary = sc.bant ? {\n    budget: sc.bant.budget.known ? sc.bant.budget.value + ' (' + sc.bant.budget.score + ')' : 'Unknown',\n    authority: sc.bant.authority.known ? sc.bant.authority.value + ' (' + sc.bant.authority.score + ')' : 'Unknown',\n    need: sc.bant.need.known ? sc.bant.need.value + ' (' + sc.bant.need.score + ')' : 'Unknown',\n    timeline: sc.bant.timeline.known ? sc.bant.timeline.value + ' (' + sc.bant.timeline.score + ')' : 'Unknown'\n  } : {};\n\n  return [{ json: {\n    status: 'qualified',\n    leadId: d.leadId,\n    receivedAt: d.receivedAt,\n    lead: {\n      name: s.name,\n      email: s.email,\n      phone: s.phone || null,\n      company: s.company || null,\n      role: s.role || null,\n      companySize: s.companySize || null,\n      budget: s.budget || 0,\n      urgency: s.urgency,\n      source: s.source\n    },\n    scoring: {\n      fitScore: sc.fitScore,\n      intentScore: sc.intentScore,\n      compositeScore: sc.compositeScore,\n      category: sc.category,\n      tier: sc.tier,\n      emoji: sc.emoji,\n      nextAction: sc.nextAction,\n      responseTime: sc.responseTime,\n      followUp: sc.followUp,\n      bant: bantSummary,\n      riskFactors: sc.riskFactors || []\n    },\n    routing: {\n      assignTo: rt.assignTo,\n      territory: rt.territory,\n      slaDeadline: rt.slaDeadline,\n      slaadjusted: rt.slaadjusted || false,\n      channel: rt.channel,\n      isAfterHours: rt.isAfterHours || false,\n      isWeekend: rt.isWeekend || false,\n      isRecycled: rt.isRecycled || false,\n      atCapacity: rt.atCapacity || false\n    },\n    actions,\n    openingAngle,\n    warnings: d.warnings || [],\n    processedAt: new Date().toISOString()\n  }}];\n} catch(e) {\n  return [{ json: { status: 'error', message: 'Response build failed: ' + e.message, leadId: ($input.first().json || {}).leadId } }];\n}\n"
+      },
+      "id": "build_response",
+      "name": "Build Response",
+      "position": [
+        2800,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond_success",
+      "name": "Respond Success",
+      "position": [
+        3000,
+        300
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.scoring.compositeScore }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              },
+              "rightValue": 40
+            }
+          ]
+        }
+      },
+      "id": "needs_notification",
+      "name": "Needs Notification?",
+      "position": [
+        3200,
+        300
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  const s = d.lead || {};\n  const sc = d.scoring || {};\n  const rt = d.routing || {};\n\n  const msg = `${sc.emoji} *NEW LEAD: ${sc.category.toUpperCase()}* (${sc.tier} tier)\\n\\n` +\n    `*Name:* ${s.name || 'Unknown'}\\n` +\n    `*Email:* ${s.email || 'Unknown'}\\n` +\n    `*Company:* ${s.company || 'Unknown'} | ${s.role || 'Unknown'}\\n` +\n    `*Budget:* $${(s.budget || 0).toLocaleString()} | *Urgency:* ${s.urgency || 'medium'}\\n\\n` +\n    `*Fit:* ${sc.fitScore}/100 | *Intent:* ${sc.intentScore}/100 | *Composite:* ${sc.compositeScore}/100\\n\\n` +\n    `*Next:* ${sc.nextAction}\\n` +\n    `*Assigned:* ${rt.assignTo} (${rt.territory})\\n` +\n    `*SLA:* ${rt.slaDeadline ? new Date(rt.slaDeadline).toLocaleString() : 'N/A'}\\n` +\n    (rt.isAfterHours ? `\\u{23F0} *AFTER HOURS* \u2014 SLA extended\\n` : '') +\n    (rt.isRecycled ? `\\u{1F501} *RECYCLED LEAD* \u2014 previous contact\\n` : '') +\n    `\\n*Angle:* ${d.openingAngle || 'General'}`;\n\n  return [{ json: { chatId: '1794140046', text: msg, parse_mode: 'Markdown' } }];\n} catch(e) {\n  return [{ json: { chatId: '1794140046', text: 'Lead received \u2014 notification formatting error' } }];\n}\n"
+      },
+      "id": "build_tg_message",
+      "name": "Build TG Message",
+      "position": [
+        3400,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "1794140046",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "tg_alert",
+      "name": "Telegram: Alert",
+      "position": [
+        3600,
+        300
+      ],
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "9we9bC5LS0MRspOh",
+          "name": "TelegramBot_MinTest"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no_notification",
+      "name": "No Notification",
+      "position": [
+        3400,
+        450
+      ],
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "error_trigger",
+      "name": "Error Trigger",
+      "position": [
+        200,
+        650
+      ],
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  const exec = $execution || {};\n  const error = d.execution?.error?.message || d.message || 'Unknown error';\n  const node = d.execution?.lastNodeExecuted || 'unknown';\n\n  const log = {\n    timestamp: new Date().toISOString(),\n    executionId: exec.id || 'unknown',\n    workflowId: exec.workflowId || 'unknown',\n    failedNode: node,\n    error: error.substring(0, 500),\n    executionUrl: exec.url || null\n  };\n\n  console.error('WORKFLOW ERROR:', JSON.stringify(log));\n  return [{ json: log }];\n} catch(e) {\n  return [{ json: { timestamp: new Date().toISOString(), error: 'Logging failed: ' + e.message } }];\n}\n"
+      },
+      "id": "log_error",
+      "name": "Log Error",
+      "position": [
+        400,
+        650
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  const msg = `\\u{26A0}\\u{FE0F} *WORKFLOW ERROR*\\n\\n` +\n    `*Node:* ${d.failedNode || 'unknown'}\\n` +\n    `*Error:* ${(d.error || 'unknown').substring(0, 200)}\\n` +\n    `*Time:* ${d.timestamp || new Date().toISOString()}\\n` +\n    `*Execution:* ${d.executionId || 'unknown'}`;\n\n  return [{ json: { chatId: '1794140046', text: msg, parse_mode: 'Markdown' } }];\n} catch(e) {\n  return [{ json: { chatId: '1794140046', text: 'Workflow error occurred \u2014 alert formatting failed' } }];\n}\n"
+      },
+      "id": "build_dlq_alert",
+      "name": "Build DLQ Alert",
+      "position": [
+        600,
+        650
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "1794140046",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "dlq_tg_alert",
+      "name": "DLQ Telegram Alert",
+      "position": [
+        800,
+        650
+      ],
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "9we9bC5LS0MRspOh",
+          "name": "TelegramBot_MinTest"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "sla_monitor",
+      "name": "SLA Monitor",
+      "position": [
+        200,
+        800
+      ],
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const staticData = $getWorkflowStaticData('node');\n  if (!staticData.leadHistory) return [{ json: { breaches: [], checkedAt: new Date().toISOString() } }];\n\n  const now = Date.now();\n  const breaches = [];\n  const leads = staticData.leadHistory || {};\n\n  for (const [email, data] of Object.entries(leads)) {\n    if (typeof data !== 'object' || !data.slaDeadline) continue;\n    const deadline = new Date(data.slaDeadline).getTime();\n    if (now > deadline && !data.slaNotified) {\n      breaches.push({\n        email,\n        category: data.category || 'unknown',\n        assignTo: data.assignTo || 'unassigned',\n        slaDeadline: data.slaDeadline,\n        overdueMinutes: Math.round((now - deadline) / 60000)\n      });\n      data.slaNotified = true;\n    }\n  }\n\n  return [{ json: { breaches, checkedAt: new Date().toISOString(), totalTracked: Object.keys(leads).length } }];\n} catch(e) {\n  return [{ json: { breaches: [], error: e.message } }];\n}\n"
+      },
+      "id": "sla_check",
+      "name": "SLA Check",
+      "position": [
+        400,
+        800
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\ntry {\n  const d = $input.first().json;\n  if (!d.breaches || d.breaches.length === 0) {\n    return [{ json: { hasBreaches: false } }];\n  }\n\n  let msg = `\\u{23F0} *SLA BREACH ALERT*\\n\\n${d.breaches.length} lead(s) exceeded SLA:\\n\\n`;\n  for (const b of d.breaches.slice(0, 5)) {\n    msg += `\\u{2022} ${b.email} (${b.category}) \u2192 ${b.assignTo} \u2014 ${b.overdueMinutes}min overdue\\n`;\n  }\n\n  return [{ json: { hasBreaches: true, chatId: '1794140046', text: msg, parse_mode: 'Markdown' } }];\n} catch(e) {\n  return [{ json: { hasBreaches: false, error: e.message } }];\n}\n"
+      },
+      "id": "build_sla_alert",
+      "name": "Build SLA Alert",
+      "position": [
+        600,
+        800
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasBreaches }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "id": "has_sla_breaches",
+      "name": "Has SLA Breaches?",
+      "position": [
+        800,
+        800
+      ],
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "1794140046",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "sla_tg_alert",
+      "name": "SLA Breach Alert",
+      "position": [
+        1000,
+        800
+      ],
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "9we9bC5LS0MRspOh",
+          "name": "TelegramBot_MinTest"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no_sla_breach",
+      "name": "No SLA Breach",
+      "position": [
+        1000,
+        900
+      ],
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Receive Lead": {
+      "main": [
+        [
+          {
+            "node": "HMAC Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Verify": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Check": {
+      "main": [
+        [
+          {
+            "node": "Idempotency Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Idempotency Gate": {
+      "main": [
+        [
+          {
+            "node": "Bot & Spam Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bot & Spam Filter": {
+      "main": [
+        [
+          {
+            "node": "Is Spam?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Spam?": {
+      "main": [
+        [
+          {
+            "node": "Reject Spam",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validate & Sanitize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reject Spam": {
+      "main": [
+        [
+          {
+            "node": "Respond Spam 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Sanitize": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "Enrich Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Lead": {
+      "main": [
+        [
+          {
+            "node": "Score Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Lead": {
+      "main": [
+        [
+          {
+            "node": "Route Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Success": {
+      "main": [
+        [
+          {
+            "node": "Needs Notification?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Notification?": {
+      "main": [
+        [
+          {
+            "node": "Build TG Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build TG Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Error": {
+      "main": [
+        [
+          {
+            "node": "Build DLQ Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build DLQ Alert": {
+      "main": [
+        [
+          {
+            "node": "DLQ Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SLA Monitor": {
+      "main": [
+        [
+          {
+            "node": "SLA Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SLA Check": {
+      "main": [
+        [
+          {
+            "node": "Build SLA Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build SLA Alert": {
+      "main": [
+        [
+          {
+            "node": "Has SLA Breaches?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has SLA Breaches?": {
+      "main": [
+        [
+          {
+            "node": "SLA Breach Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No SLA Breach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [],
+  "pinData": {}
+}
